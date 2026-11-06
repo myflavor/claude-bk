@@ -6,6 +6,25 @@ Claude Code 对话备份工具。把**当前目录**对应的对话记录打包�
 
 ## 安装
 
+### Linux / macOS
+
+```bash
+curl -sSL https://raw.githubusercontent.com/myflavor/claude-bk/main/scripts/install.sh | bash
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/myflavor/claude-bk/main/scripts/install.ps1 | iex
+```
+
+安装脚本会：
+1. 从 GitHub Releases 下载对应平台的二进制（`claude-bk-<os>-<arch>`，Windows 带 `.exe`）
+2. 放到和 `claude` 同一个目录（自动在 PATH 里）
+3. 若还没有 `~/.claude-bk/`，创建一个并打印配置示例
+
+### 从源码编译
+
 ```bash
 go build -o ~/.local/bin/claude-bk ./cmd/claude-bk
 ```
@@ -89,3 +108,16 @@ $CLAUDE_CONFIG_DIR/projects/<enc>/
 - 路径先做 `EvalSymlinks`，因为 Claude Code 记录的是物理路径
 
 实测参考（本机）：mg4 3.3 MB → 745 KB；massage 132.5 MB → 24.5 MB，push 0.73 秒。
+
+## 在 Windows 上解包
+
+备份文件是 `tar.zst`，Windows 自带 `tar.exe`（Windows 10 1803 之后，内嵌 libzstd）可以直接解：
+
+```powershell
+tar -tf  .\-home-xin-mg4.tar.zst      # 查看内容
+tar -xf  .\-home-xin-mg4.tar.zst      # 解到当前目录
+```
+
+**必须带 `.\` 前缀**，因为文件名以 `-` 开头，否则 `tar` 会把它当成命令行选项。资源管理器里右键用 7-Zip 解压不受此影响。
+
+解出的 `-home-xin-mg4\` 目录，放回 `~/.claude/projects/` 下即可被 `claude --resume` 识别。

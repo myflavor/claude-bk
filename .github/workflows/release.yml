@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target.os }}-${{ matrix.target.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { os: linux,   arch: amd64, ext: '' }
+          - { os: linux,   arch: arm64, ext: '' }
+          - { os: darwin,  arch: amd64, ext: '' }
+          - { os: darwin,  arch: arm64, ext: '' }
+          - { os: windows, arch: amd64, ext: '.exe' }
+          - { os: windows, arch: arm64, ext: '.exe' }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.target.os }}
+          GOARCH: ${{ matrix.target.arch }}
+          EXT: ${{ matrix.target.ext }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" \
+            -o "dist/claude-bk-${GOOS}-${GOARCH}${EXT}" ./cmd/claude-bk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target.os }}-${{ matrix.target.arch }}
+          path: dist/claude-bk-*
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show artifacts
+        run: ls -la dist/
+
+      # Wipe any pre-existing release for this tag (e.g. when re-releasing the
+      # same version) so stale assets don't linger alongside the new binaries.
+      - name: Delete existing release (if any)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete "${GITHUB_REF_NAME}" --yes --repo "${GITHUB_REPOSITORY}"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/claude-bk-linux-amd64
+            dist/claude-bk-linux-arm64
+            dist/claude-bk-darwin-amd64
+            dist/claude-bk-darwin-arm64
+            dist/claude-bk-windows-amd64.exe
+            dist/claude-bk-windows-arm64.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
