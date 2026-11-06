@@ -1,4 +1,14 @@
+# Build output (root-level artifact only — not cmd/claude-bk)
 /claude-bk
 /dist/
 *.exe
+*.dll
+*.so
+*.dylib
+
+# Backup archives written by local providers
 *.zst
+
+# Go workspace files
+go.work
+go.work.sum
