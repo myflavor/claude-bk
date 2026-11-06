@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,6 +79,53 @@ func TestPackUnpackAreInverses(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dest, "s.jsonl")); err != nil {
 		t.Fatalf("content not restored at the destination root: %v", err)
+	}
+}
+
+func TestPackOmitsRootEntry(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "-home-xin-mg4")
+	writeTree(t, src, map[string]string{"a.jsonl": "x", "memory/MEMORY.md": "y"})
+
+	var buf bytes.Buffer
+	if _, err := Pack(&buf, src); err != nil {
+		t.Fatal(err)
+	}
+
+	dec, err := zstd.NewReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dec.Close()
+
+	tr := tar.NewReader(dec)
+	var names []string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, hdr.Name)
+	}
+
+	for _, name := range names {
+		if name == "." || name == "./" {
+			t.Fatalf("archive contains a root entry %q; entries: %v", name, names)
+		}
+	}
+	want := map[string]bool{"a.jsonl": false, "memory": false, "memory/MEMORY.md": false}
+	for _, name := range names {
+		if _, ok := want[name]; !ok {
+			t.Fatalf("unexpected entry %q; entries: %v", name, names)
+		}
+		want[name] = true
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Fatalf("missing entry %q; entries: %v", name, names)
+		}
 	}
 }
 

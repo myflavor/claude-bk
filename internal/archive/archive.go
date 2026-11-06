@@ -33,6 +33,9 @@ func Pack(w io.Writer, dir string) (int64, error) {
 		if err != nil {
 			return err
 		}
+		if rel == "." {
+			return nil
+		}
 		if err := writeEntry(tw, p, rel, info); err != nil {
 			return err
 		}
