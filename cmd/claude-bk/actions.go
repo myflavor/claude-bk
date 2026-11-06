@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -28,7 +29,14 @@ func runPush(providerName string) error {
 	pr, pw := io.Pipe()
 	packErr := make(chan error, 1)
 	go func() {
-		_, err := archive.Pack(io.MultiWriter(pw, size), dir)
+		// io.Pipe is unbuffered, so without this the zstd encoder's ~24 KB
+		// blocks reach the SMB writer as individual requests. Buffering to
+		// the library's 1 MB request cap turns ~1000 round trips into ~25.
+		bw := bufio.NewWriterSize(pw, 1<<20)
+		_, err := archive.Pack(io.MultiWriter(bw, size), dir)
+		if err == nil {
+			err = bw.Flush()
+		}
 		pw.CloseWithError(err)
 		packErr <- err
 	}()
@@ -67,7 +75,9 @@ func runPull(providerName string) error {
 	}
 
 	fmt.Printf("Restoring %s\n", dir)
-	if err := archive.Unpack(rc, dir); err != nil {
+	// The zstd decoder reads its input in small unbuffered pieces (block
+	// headers are 1–4 bytes), which would become one SMB request each.
+	if err := archive.Unpack(bufio.NewReaderSize(rc, 1<<20), dir); err != nil {
 		return fmt.Errorf("failed to unpack %s: %w", name, err)
 	}
 	fmt.Println("Done.")

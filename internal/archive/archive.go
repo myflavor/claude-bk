@@ -23,6 +23,7 @@ func Pack(w io.Writer, dir string) (int64, error) {
 		return 0, err
 	}
 	tw := tar.NewWriter(enc)
+	buf := make([]byte, 128<<10)
 
 	var inputBytes int64
 	err = filepath.Walk(dir, func(p string, info os.FileInfo, walkErr error) error {
@@ -36,7 +37,7 @@ func Pack(w io.Writer, dir string) (int64, error) {
 		if rel == "." {
 			return nil
 		}
-		if err := writeEntry(tw, p, rel, info); err != nil {
+		if err := writeEntry(tw, p, rel, info, buf); err != nil {
 			return err
 		}
 		if !info.IsDir() {
@@ -54,7 +55,7 @@ func Pack(w io.Writer, dir string) (int64, error) {
 	return inputBytes, enc.Close()
 }
 
-func writeEntry(tw *tar.Writer, path, name string, info os.FileInfo) error {
+func writeEntry(tw *tar.Writer, path, name string, info os.FileInfo, buf []byte) error {
 	hdr, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return err
@@ -76,7 +77,7 @@ func writeEntry(tw *tar.Writer, path, name string, info os.FileInfo) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.CopyN(tw, f, info.Size())
+	_, err = io.CopyBuffer(tw, io.LimitReader(f, info.Size()), buf)
 	return err
 }
 
@@ -111,9 +112,6 @@ func Unpack(r io.Reader, dir string) error {
 				return err
 			}
 		case tar.TypeReg:
-			if err := root.MkdirAll(filepath.Dir(hdr.Name), 0o755); err != nil {
-				return err
-			}
 			if err := writeFile(root, hdr.Name, tr, hdr.Size); err != nil {
 				return err
 			}
