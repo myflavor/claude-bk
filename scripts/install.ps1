@@ -49,18 +49,6 @@ try {
         Write-Host ""
         Write-Host "Created providers directory: $ProvidersDir"
         Write-Host "Add a provider by placing a config file at: $ProvidersDir\<name>.json"
-        Write-Host ""
-        Write-Host "Example ($ProvidersDir\nas.json):"
-        Write-Host '  {'
-        Write-Host '    "type": "smb",'
-        Write-Host '    "host": "192.168.1.10",'
-        Write-Host '    "share": "backup",'
-        Write-Host '    "user": "you",'
-        Write-Host '    "password": "secret",'
-        Write-Host '    "root": "claude-bk"'
-        Write-Host '  }'
-        Write-Host ""
-        Write-Host "The file holds a plain-text password; keep it out of git."
     }
 
     Write-Host ""

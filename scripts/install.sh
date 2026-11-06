@@ -69,18 +69,6 @@ if [ ! -d "$PROVIDERS_DIR" ]; then
     echo ""
     echo "Created providers directory: $PROVIDERS_DIR"
     echo "Add a provider by placing a config file at: $PROVIDERS_DIR/<name>.json"
-    echo ""
-    echo "Example ($PROVIDERS_DIR/nas.json):"
-    echo '  {'
-    echo '    "type": "smb",'
-    echo '    "host": "192.168.1.10",'
-    echo '    "share": "backup",'
-    echo '    "user": "you",'
-    echo '    "password": "secret",'
-    echo '    "root": "claude-bk"'
-    echo '  }'
-    echo ""
-    echo "The file holds a plain-text password; keep it at mode 600 and out of git."
 fi
 
 echo ""
