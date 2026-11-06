@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -28,68 +29,51 @@ func newSMBStore(cfg *provider.Config) (Store, error) {
 		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
 	}
 
+	s := &smbStore{conn: conn}
 	dialer := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{
 			User:     cfg.User,
 			Password: cfg.Password,
 		},
 	}
-	session, err := dialer.Dial(conn)
-	if err != nil {
-		conn.Close()
+	if s.session, err = dialer.Dial(conn); err != nil {
+		s.Close()
 		return nil, fmt.Errorf("SMB authentication failed for %s: %w", addr, err)
 	}
-
-	share, err := session.Mount(cfg.Share)
-	if err != nil {
-		session.Logoff()
-		conn.Close()
+	if s.share, err = s.session.Mount(cfg.Share); err != nil {
+		s.Close()
 		return nil, fmt.Errorf("failed to mount share %q on %s: %w", cfg.Share, addr, err)
 	}
 
 	root, err := normaliseRoot(cfg.Root)
 	if err != nil {
-		share.Umount()
-		session.Logoff()
-		conn.Close()
+		s.Close()
 		return nil, err
 	}
+	s.root = root
 	if root != "" {
-		if err := share.MkdirAll(root, 0o755); err != nil {
-			share.Umount()
-			session.Logoff()
-			conn.Close()
+		if err := s.share.MkdirAll(root, 0o755); err != nil {
+			s.Close()
 			return nil, fmt.Errorf("failed to create root directory %q on share %q: %w", root, cfg.Share, err)
 		}
 	}
-
-	return &smbStore{conn: conn, session: session, share: share, root: root}, nil
+	return s, nil
 }
 
 // normaliseRoot turns a configured root into a share-relative SMB path.
 func normaliseRoot(root string) (string, error) {
-	root = strings.TrimSpace(root)
-	if root == "" || root == "." {
+	root = path.Clean(filepath.ToSlash(strings.TrimSpace(root)))
+	if root == "." || root == "/" {
 		return "", nil
 	}
-	if filepath.IsAbs(root) {
-		return "", fmt.Errorf("root must be relative to the share, got absolute path %q", root)
-	}
-	root = path.Clean(strings.ReplaceAll(root, `\`, "/"))
-	if root == "." {
-		return "", nil
-	}
-	if strings.HasPrefix(root, "..") {
-		return "", fmt.Errorf("root must not escape the share: %q", root)
+	if !filepath.IsLocal(root) {
+		return "", fmt.Errorf("root must be a relative path inside the share: %q", root)
 	}
 	return root, nil
 }
 
 func (s *smbStore) objectPath(name string) string {
-	if s.root == "" {
-		return name
-	}
-	return s.root + "/" + name
+	return path.Join(s.root, name)
 }
 
 func (s *smbStore) Put(name string, r io.Reader) error {
@@ -110,7 +94,7 @@ func (s *smbStore) Put(name string, r io.Reader) error {
 		return fmt.Errorf("failed to close %s: %w", tmp, err)
 	}
 
-	if err := s.share.Remove(target); err != nil && !isNotExist(err) {
+	if err := s.share.Remove(target); err != nil && !os.IsNotExist(err) {
 		s.share.Remove(tmp)
 		return fmt.Errorf("failed to replace existing %s: %w", name, err)
 	}
@@ -124,8 +108,8 @@ func (s *smbStore) Put(name string, r io.Reader) error {
 func (s *smbStore) Get(name string) (io.ReadCloser, error) {
 	f, err := s.share.Open(s.objectPath(name))
 	if err != nil {
-		if isNotExist(err) {
-			return nil, fmt.Errorf("no backup found for this project: %s", name)
+		if os.IsNotExist(err) {
+			return nil, errNotFound(name)
 		}
 		return nil, fmt.Errorf("failed to open %s: %w", name, err)
 	}
@@ -133,30 +117,14 @@ func (s *smbStore) Get(name string) (io.ReadCloser, error) {
 }
 
 func (s *smbStore) Close() error {
-	var firstErr error
 	if s.share != nil {
-		if err := s.share.Umount(); err != nil {
-			firstErr = err
-		}
+		s.share.Umount()
 	}
 	if s.session != nil {
-		if err := s.session.Logoff(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		s.session.Logoff()
 	}
 	if s.conn != nil {
-		if err := s.conn.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+		return s.conn.Close()
 	}
-	return firstErr
-}
-
-func isNotExist(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, "not exist") ||
-		strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "STATUS_OBJECT_NAME_NOT_FOUND") ||
-		strings.Contains(msg, "STATUS_OBJECT_PATH_NOT_FOUND")
+	return nil
 }

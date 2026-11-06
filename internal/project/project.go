@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 const (
@@ -19,9 +18,9 @@ const (
 
 var nonAlnum = regexp.MustCompile(`[^a-zA-Z0-9]`)
 
-// ConfigDir returns the Claude Code config directory, honoring CLAUDE_CONFIG_DIR
+// configDir returns the Claude Code config directory, honoring CLAUDE_CONFIG_DIR
 // the same way Claude Code itself does.
-func ConfigDir() (string, error) {
+func configDir() (string, error) {
 	if dir := os.Getenv(configDirEnv); dir != "" {
 		if !filepath.IsAbs(dir) {
 			return "", fmt.Errorf("%s must be an absolute path: %s", configDirEnv, dir)
@@ -35,10 +34,10 @@ func ConfigDir() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-// EncodedName converts a working directory to Claude Code's directory name.
+// encodedName converts a working directory to Claude Code's directory name.
 // Every non-alphanumeric byte becomes '-'; names over 200 bytes are truncated
 // and suffixed with a base36 hash of the full path.
-func EncodedName(cwd string) string {
+func encodedName(cwd string) string {
 	enc := nonAlnum.ReplaceAllString(cwd, "-")
 	if len(enc) <= maxEncLen {
 		return enc
@@ -75,16 +74,10 @@ func Resolve() (dir string, encoded string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("failed to resolve %s: %w", cwd, err)
 	}
-	cfg, err := ConfigDir()
+	cfg, err := configDir()
 	if err != nil {
 		return "", "", err
 	}
-	enc := EncodedName(real)
+	enc := encodedName(real)
 	return filepath.Join(cfg, projectsSub, enc), enc, nil
-}
-
-// CwdFromEncoded is the inverse hint used only for display. The encoding is
-// lossy, so this returns the best-effort path with '-' separators.
-func CwdFromEncoded(enc string) string {
-	return strings.ReplaceAll(enc, "-", "/")
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"claude-bk/internal/archive"
 	"claude-bk/internal/backend"
@@ -13,69 +12,48 @@ import (
 )
 
 func runPush(providerName string) error {
-	cfg, err := provider.Load(providerName)
+	dir, enc, store, closeStore, err := prepare(providerName)
 	if err != nil {
 		return err
 	}
-
-	dir, enc, err := project.Resolve()
-	if err != nil {
-		return err
-	}
+	defer closeStore()
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return fmt.Errorf("no conversations for this directory (expected %s)", dir)
 	}
 
-	store, err := backend.Open(cfg)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-
 	name := enc + "." + archive.Extension
-	fmt.Printf("Packing %s (%s)\n", dir, humanBytes(dirSize(dir)))
+	fmt.Printf("Packing %s\n", dir)
 
-	counter := &countingReader{}
+	size := &countingWriter{}
 	pr, pw := io.Pipe()
 	packErr := make(chan error, 1)
 	go func() {
-		err := archive.Pack(io.MultiWriter(pw, counter), dir)
+		_, err := archive.Pack(io.MultiWriter(pw, size), dir)
 		pw.CloseWithError(err)
 		packErr <- err
 	}()
 
 	fmt.Printf("Uploading %s\n", name)
-	putErr := store.Put(name, pr)
-	pr.Close()
-
-	if putErr != nil {
+	if err := store.Put(name, pr); err != nil {
+		pr.CloseWithError(err)
 		<-packErr
-		return putErr
+		return err
 	}
+	pr.Close()
 	if err := <-packErr; err != nil {
 		return err
 	}
 
-	fmt.Printf("Done (%s).\n", humanBytes(counter.n))
+	fmt.Printf("Done (%s).\n", humanBytes(size.n))
 	return nil
 }
 
 func runPull(providerName string) error {
-	cfg, err := provider.Load(providerName)
+	dir, enc, store, closeStore, err := prepare(providerName)
 	if err != nil {
 		return err
 	}
-
-	dir, enc, err := project.Resolve()
-	if err != nil {
-		return err
-	}
-
-	store, err := backend.Open(cfg)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
+	defer closeStore()
 
 	name := enc + "." + archive.Extension
 	rc, err := store.Get(name)
@@ -84,21 +62,39 @@ func runPull(providerName string) error {
 	}
 	defer rc.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
 	fmt.Printf("Restoring %s\n", dir)
-	if err := archive.Unpack(rc, filepath.Dir(dir)); err != nil {
+	if err := archive.Unpack(rc, dir); err != nil {
 		return fmt.Errorf("failed to unpack %s: %w", name, err)
 	}
 	fmt.Println("Done.")
 	return nil
 }
 
-type countingReader struct{ n int64 }
+// prepare resolves the current project and opens the provider's store. The
+// returned close function must be called by the caller.
+func prepare(providerName string) (dir, enc string, store backend.Store, closeStore func(), err error) {
+	cfg, err := provider.Load(providerName)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	dir, enc, err = project.Resolve()
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	store, err = backend.Open(cfg)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	return dir, enc, store, func() { store.Close() }, nil
+}
 
-func (c *countingReader) Write(p []byte) (int, error) {
+type countingWriter struct{ n int64 }
+
+func (c *countingWriter) Write(p []byte) (int, error) {
 	c.n += int64(len(p))
 	return len(p), nil
 }

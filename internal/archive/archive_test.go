@@ -1,10 +1,13 @@
 package archive
 
 import (
+	"archive/tar"
 	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func writeTree(t *testing.T, root string, files map[string]string) {
@@ -32,11 +35,16 @@ func TestRoundTrip(t *testing.T) {
 	writeTree(t, src, files)
 
 	var buf bytes.Buffer
-	if err := Pack(&buf, src); err != nil {
+	n, err := Pack(&buf, src)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if buf.Len() == 0 {
-		t.Fatal("empty archive")
+	var wantBytes int64
+	for _, c := range files {
+		wantBytes += int64(len(c))
+	}
+	if n != wantBytes {
+		t.Fatalf("Pack reported %d input bytes, want %d", n, wantBytes)
 	}
 
 	dest := t.TempDir()
@@ -45,7 +53,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 
 	for name, want := range files {
-		got, err := os.ReadFile(filepath.Join(dest, "-home-xin-mg4", name))
+		got, err := os.ReadFile(filepath.Join(dest, name))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -55,13 +63,12 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRoundTripPreservesTopLevelDir(t *testing.T) {
-	parent := t.TempDir()
-	src := filepath.Join(parent, "-mnt-d-Projects-coolapk")
+func TestPackUnpackAreInverses(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "-mnt-d-Projects-coolapk")
 	writeTree(t, src, map[string]string{"s.jsonl": "x"})
 
 	var buf bytes.Buffer
-	if err := Pack(&buf, src); err != nil {
+	if _, err := Pack(&buf, src); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,25 +76,78 @@ func TestRoundTripPreservesTopLevelDir(t *testing.T) {
 	if err := Unpack(&buf, dest); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dest, "-mnt-d-Projects-coolapk", "s.jsonl")); err != nil {
-		t.Fatalf("top-level directory not preserved: %v", err)
+	if _, err := os.Stat(filepath.Join(dest, "s.jsonl")); err != nil {
+		t.Fatalf("content not restored at the destination root: %v", err)
 	}
 }
 
 func TestUnpackRejectsPathTraversal(t *testing.T) {
-	for _, name := range []string{"../escape", "a/../../escape"} {
-		if _, err := safeJoin("/tmp/dest", name); err == nil {
-			t.Fatalf("expected rejection for %q", name)
-		}
-	}
-	if _, err := safeJoin("/tmp/dest", "/abs/path"); err == nil {
-		t.Fatal("expected rejection for absolute path")
+	for _, name := range []string{"../escape", "a/../../escape", "/abs/path"} {
+		t.Run(name, func(t *testing.T) {
+			dest := t.TempDir()
+			outside := filepath.Join(filepath.Dir(dest), "escape")
+			defer os.RemoveAll(outside)
+
+			if err := Unpack(maliciousArchive(t, name), dest); err == nil {
+				t.Fatalf("expected rejection for %q", name)
+			}
+			if _, err := os.Stat(outside); err == nil {
+				t.Fatalf("%q escaped the destination", name)
+			}
+		})
 	}
 }
 
+func maliciousArchive(t *testing.T, name string) *bytes.Reader {
+	t.Helper()
+	var buf bytes.Buffer
+	enc, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(enc)
+	body := []byte("pwned")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     name,
+		Mode:     0o600,
+		Size:     int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return bytes.NewReader(buf.Bytes())
+}
+
 func TestUnpackRejectsCorruptStream(t *testing.T) {
-	err := Unpack(bytes.NewReader([]byte("not a zstd stream")), t.TempDir())
-	if err == nil {
+	if err := Unpack(bytes.NewReader([]byte("not a zstd stream")), t.TempDir()); err == nil {
 		t.Fatal("expected error for corrupt input")
+	}
+}
+
+func TestUnpackRejectsUnexpectedEntryType(t *testing.T) {
+	var buf bytes.Buffer
+	enc, _ := zstd.NewWriter(&buf)
+	tw := tar.NewWriter(enc)
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     "link",
+		Linkname: "/etc/passwd",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	enc.Close()
+
+	if err := Unpack(&buf, t.TempDir()); err == nil {
+		t.Fatal("expected error for symlink entry")
 	}
 }

@@ -5,8 +5,6 @@ package main
 import (
 	"fmt"
 	"os"
-
-	"github.com/spf13/cobra"
 )
 
 const usage = `claude-bk <provider> <push|pull>
@@ -28,25 +26,13 @@ Examples:
 `
 
 func main() {
-	root := &cobra.Command{
-		Use:           "claude-bk <provider> <push|pull>",
-		Short:         "Back up Claude Code conversations for the current directory",
-		Long:          usage,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE:          run,
-	}
-	root.SetHelpTemplate(usage)
-	root.SetUsageTemplate(usage)
-	root.SetHelpFunc(func(*cobra.Command, []string) { fmt.Print(usage) })
-
-	if err := root.Execute(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(cmd *cobra.Command, args []string) error {
+func run(args []string) error {
 	if len(args) == 0 {
 		fmt.Print(usage)
 		return fmt.Errorf("provider is required")

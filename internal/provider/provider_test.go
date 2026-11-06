@@ -36,9 +36,6 @@ func TestLoadSMBDefaults(t *testing.T) {
 	if cfg.Port != 445 {
 		t.Fatalf("port default: got %d", cfg.Port)
 	}
-	if cfg.Root != "." {
-		t.Fatalf("root default: got %q", cfg.Root)
-	}
 }
 
 func TestLoadLocal(t *testing.T) {

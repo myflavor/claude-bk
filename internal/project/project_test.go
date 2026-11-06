@@ -26,15 +26,15 @@ func TestEncodedName(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := EncodedName(tc.cwd); got != tc.want {
-				t.Fatalf("EncodedName(%q)\n got: %s\nwant: %s", tc.cwd, got, tc.want)
+			if got := encodedName(tc.cwd); got != tc.want {
+				t.Fatalf("encodedName(%q)\n got: %s\nwant: %s", tc.cwd, got, tc.want)
 			}
 		})
 	}
 
 	// Verified against a real Claude Code build: it accepts a directory named
 	// with the 200-byte prefix and the base36 hash suffix.
-	got := EncodedName(longPath)
+	got := encodedName(longPath)
 	const suffix = "-kgrvhk"
 	if !strings.HasSuffix(got, suffix) {
 		t.Fatalf("long path suffix: got %s, want ...%s", got, suffix)
@@ -57,7 +57,7 @@ func repeat(s string, n int) string {
 
 func TestConfigDirHonoursEnv(t *testing.T) {
 	t.Setenv(configDirEnv, "/tmp/fake-claude-home")
-	got, err := ConfigDir()
+	got, err := configDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestConfigDirHonoursEnv(t *testing.T) {
 
 func TestConfigDirRejectsRelative(t *testing.T) {
 	t.Setenv(configDirEnv, "relative/path")
-	if _, err := ConfigDir(); err == nil {
+	if _, err := configDir(); err == nil {
 		t.Fatal("expected error for relative CLAUDE_CONFIG_DIR")
 	}
 }
@@ -95,7 +95,7 @@ func TestResolveFollowsSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := EncodedName(real); enc != want {
+	if want := encodedName(real); enc != want {
 		t.Fatalf("got %s, want %s (resolved target of symlink)", enc, want)
 	}
 }

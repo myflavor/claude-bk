@@ -20,16 +20,12 @@ type Store interface {
 	Close() error
 }
 
-// Open builds a Store from a provider config.
+// Open builds a Store from a validated provider config.
 func Open(cfg *provider.Config) (Store, error) {
-	switch cfg.Type {
-	case "local":
+	if cfg.Type == "local" {
 		return &localStore{dir: cfg.Path}, nil
-	case "smb":
-		return newSMBStore(cfg)
-	default:
-		return nil, fmt.Errorf("unknown type %q", cfg.Type)
 	}
+	return newSMBStore(cfg)
 }
 
 type localStore struct{ dir string }
@@ -63,7 +59,7 @@ func (s *localStore) Get(name string) (io.ReadCloser, error) {
 	f, err := os.Open(filepath.Join(s.dir, name))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no backup found for this project: %s", name)
+			return nil, errNotFound(name)
 		}
 		return nil, err
 	}
@@ -71,3 +67,7 @@ func (s *localStore) Get(name string) (io.ReadCloser, error) {
 }
 
 func (s *localStore) Close() error { return nil }
+
+func errNotFound(name string) error {
+	return fmt.Errorf("no backup found for this project: %s", name)
+}

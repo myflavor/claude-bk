@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const configDirName = ".claude-bk"
@@ -22,8 +23,8 @@ type Config struct {
 	Path     string `json:"path,omitempty"`
 }
 
-// Dir returns the provider config directory.
-func Dir() (string, error) {
+// dir returns the provider config directory.
+func dir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
@@ -33,7 +34,7 @@ func Dir() (string, error) {
 
 // Load reads and validates a named provider.
 func Load(name string) (*Config, error) {
-	dir, err := Dir()
+	dir, err := dir()
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +78,6 @@ func (c *Config) validate() error {
 		if c.Port == 0 {
 			c.Port = 445
 		}
-		if c.Root == "" {
-			c.Root = "."
-		}
 	case "local":
 		if c.Path == "" {
 			return fmt.Errorf("missing required field \"path\" for type local")
@@ -101,7 +99,7 @@ func unavailable(dir string) string {
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) == ".json" {
-			names = append(names, e.Name()[:len(e.Name())-len(".json")])
+			names = append(names, strings.TrimSuffix(e.Name(), ".json"))
 		}
 	}
 	if len(names) == 0 {
